@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS company_settings (
   state TEXT NOT NULL,
   state_code TEXT NOT NULL,
   invoice_prefix TEXT NOT NULL DEFAULT 'INV',
+  variance_tolerance_bps INTEGER NOT NULL DEFAULT 300 CHECK (variance_tolerance_bps >= 0),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -270,6 +271,19 @@ CREATE TABLE IF NOT EXISTS payments (
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS price_list (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  customer_id INTEGER REFERENCES customers(id),
+  price_paisa INTEGER NOT NULL CHECK (price_paisa >= 0),
+  effective_from TEXT NOT NULL DEFAULT (date('now')),
+  effective_to TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_list_lookup ON price_list(item_id, customer_id, is_active);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

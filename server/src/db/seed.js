@@ -1,33 +1,38 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import bcrypt from 'bcryptjs';
 import { initSchema, openDb } from './connection.js';
 import { toPaisa, toScaledQty } from '../lib/units.js';
 import { appendStockMovement } from '../services/inventory.js';
 import { recordAudit } from '../services/audit.js';
 
-export function seedDatabase(db) {
+export const DEFAULT_SEED_PASSWORD = 'password123';
+
+export function seedDatabase(db, { bcryptRounds = 8, defaultPassword = DEFAULT_SEED_PASSWORD } = {}) {
   const existing = db.prepare('SELECT COUNT(*) AS cnt FROM items').get();
   if (existing.cnt > 0) {
     return getSeedLookup(db);
   }
 
+  const passwordHash = bcrypt.hashSync(defaultPassword, bcryptRounds);
+
   const runSeed = db.transaction(() => {
     db.prepare(`
-      INSERT INTO company_settings (id, company_name, gstin, state, state_code, invoice_prefix)
-      VALUES (1, ?, ?, ?, ?, ?)
-    `).run('Kaveri Crunch Foods Pvt Ltd', '33AABCK1234F1Z5', 'Tamil Nadu', '33', 'INV');
+      INSERT INTO company_settings (id, company_name, gstin, state, state_code, invoice_prefix, variance_tolerance_bps)
+      VALUES (1, ?, ?, ?, ?, ?, ?)
+    `).run('Kaveri Crunch Foods Pvt Ltd', '33AABCK1234F1Z5', 'Tamil Nadu', '33', 'INV', 300);
 
     const insertUser = db.prepare(`
       INSERT INTO users (username, full_name, role, password_hash)
       VALUES (?, ?, ?, ?)
     `);
     const users = [
-      ['owner1', 'Arunachalam S', 'owner', 'prototype-hash-owner'],
-      ['admin1', 'Meenakshi R', 'admin', 'prototype-hash-admin'],
-      ['prod1', 'Karthik V', 'production', 'prototype-hash-prod'],
-      ['sales1', 'Suresh K', 'salesman', 'prototype-hash-sales'],
-      ['audit1', 'Priya N', 'auditor', 'prototype-hash-audit'],
+      ['owner1', 'Arunachalam S', 'owner', passwordHash],
+      ['admin1', 'Meenakshi R', 'admin', passwordHash],
+      ['prod1', 'Karthik V', 'production', passwordHash],
+      ['sales1', 'Suresh K', 'salesman', passwordHash],
+      ['audit1', 'Priya N', 'auditor', passwordHash],
     ];
     for (const u of users) {
       insertUser.run(...u);
@@ -218,6 +223,12 @@ export function seedDatabase(db) {
       '45 Market Road, Bengaluru, Karnataka',
       '9845022222'
     );
+
+    // Default price list entry for finished Murukku 200 g (Rs 50.00 = 5000 paisa)
+    db.prepare(`
+      INSERT INTO price_list (item_id, customer_id, price_paisa, effective_from, is_active)
+      VALUES (?, NULL, ?, '2026-04-01', 1)
+    `).run(itemIds['FG-MURUKKU-200G'], toPaisa('50.00'));
 
     recordAudit(db, {
       actorUserId: adminUser.id,

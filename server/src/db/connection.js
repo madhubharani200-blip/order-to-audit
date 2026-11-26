@@ -20,5 +20,11 @@ export function openDb(dbPath = ':memory:') {
 export function initSchema(db) {
   const sql = fs.readFileSync(SCHEMA_PATH, 'utf8');
   db.exec(sql);
+  const cols = db.prepare('PRAGMA table_info(company_settings)').all();
+  if (!cols.some((c) => c.name === 'variance_tolerance_bps')) {
+    db.exec(
+      'ALTER TABLE company_settings ADD COLUMN variance_tolerance_bps INTEGER NOT NULL DEFAULT 300 CHECK (variance_tolerance_bps >= 0)'
+    );
+  }
   return db;
 }
