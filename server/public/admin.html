@@ -172,7 +172,7 @@
         const order = ordDetail.order;
         const oLines = ordDetail.lines || [];
 
-        const lines = oLines.map(l => ({ itemId: l.item_id, qty: l.qty_scaled / 1_000_000 }));
+        const lines = oLines.map(l => ({ itemId: l.item_id, qty: l.qty_ordered_scaled / 1_000_000 }));
         const inv = await apiJSON('/invoices', {
           method: 'POST',
           body: JSON.stringify({
