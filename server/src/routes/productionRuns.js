@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { bpsToPercent, fromScaledQty } from '../lib/units.js';
 import { ALL_ROLES, requireRole } from '../middleware/auth.js';
+import { addProductionOverheads, getProductionRunCost } from '../services/costing.js';
 import { recordProductionRun } from '../services/production.js';
 
 function getToleranceBps(db) {
@@ -219,6 +220,58 @@ export function createProductionRunsRouter(db) {
 
       const runRow = db.prepare('SELECT * FROM production_runs WHERE id = ?').get(created.id);
       return res.status(201).json({ productionRun: formatProductionRun(db, runRow) });
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.post('/:id/overheads', requireRole('production', 'admin'), (req, res, next) => {
+    try {
+      const productionRunId = Number(req.params.id);
+      const body = req.body ?? {};
+      let overheads = [];
+
+      if (Array.isArray(body.overheads)) {
+        overheads = body.overheads;
+      } else if (body.category && body.amountPaisa !== undefined) {
+        overheads = [
+          {
+            category: body.category,
+            amountPaisa: body.amountPaisa,
+            description: body.description,
+          },
+        ];
+      } else {
+        if (body.labourPaisa !== undefined) {
+          overheads.push({ category: 'labour', amountPaisa: body.labourPaisa, description: body.notes });
+        }
+        if (body.powerPaisa !== undefined) {
+          overheads.push({ category: 'power', amountPaisa: body.powerPaisa, description: body.notes });
+        }
+        if (body.gasPaisa !== undefined) {
+          overheads.push({ category: 'gas', amountPaisa: body.gasPaisa, description: body.notes });
+        }
+        if (body.otherPaisa !== undefined) {
+          overheads.push({ category: 'other', amountPaisa: body.otherPaisa, description: body.notes });
+        }
+      }
+
+      const added = addProductionOverheads(db, {
+        productionRunId,
+        overheads,
+        actorUserId: req.user.id,
+      });
+      const cost = getProductionRunCost(db, productionRunId);
+      return res.status(201).json({ added, cost });
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.get('/:id/cost', requireRole(...ALL_ROLES), (req, res, next) => {
+    try {
+      const cost = getProductionRunCost(db, Number(req.params.id));
+      return res.json({ cost });
     } catch (err) {
       return next(err);
     }

@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { fromScaledQty } from '../lib/units.js';
 import { ALL_ROLES, requireRole } from '../middleware/auth.js';
-import { createOrder, dispatchAndInvoice, recordPayment } from '../services/sales.js';
+import {
+  approveOrder,
+  createOrder,
+  dispatchAndInvoice,
+  getOrderStockCheck,
+  recordPayment,
+} from '../services/sales.js';
 
 function resolveEffectivePricePaisa(db, itemId, customerId, explicitPrice) {
   if (explicitPrice !== undefined) return explicitPrice;
@@ -85,6 +91,29 @@ export function createOrdersRouter(db) {
     if (!order) return next(new NotFoundError('Order not found'));
     const lines = db.prepare('SELECT * FROM order_lines WHERE order_id = ?').all(order.id);
     return res.json({ order, lines });
+  });
+
+  router.get('/:id/stock-check', requireRole(...ALL_ROLES), (req, res, next) => {
+    try {
+      const check = getOrderStockCheck(db, Number(req.params.id));
+      return res.json(check);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.post('/:id/approve', requireRole('admin'), (req, res, next) => {
+    try {
+      const allowShortage = req.body?.allowShortage === true;
+      const result = approveOrder(db, {
+        orderId: Number(req.params.id),
+        allowShortage,
+        actorUserId: req.user.id,
+      });
+      return res.json(result);
+    } catch (err) {
+      return next(err);
+    }
   });
 
   router.post('/', requireRole('salesman', 'admin'), (req, res, next) => {

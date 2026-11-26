@@ -1,3 +1,4 @@
+import { ConflictError, NotFoundError, ValidationError } from '../lib/errors.js';
 import {
   calcGstSplit,
   fromScaledQty,
@@ -7,6 +8,108 @@ import {
 } from '../lib/units.js';
 import { recordAudit } from './audit.js';
 import { appendStockMovement, getStockBalanceScaled } from './inventory.js';
+
+export function getOrderStockCheck(db, orderId) {
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  if (!order) {
+    throw new NotFoundError(`Order not found: ${orderId}`);
+  }
+
+  const orderLines = db
+    .prepare(`
+      SELECT ol.*, i.sku, i.name AS item_name
+      FROM order_lines ol
+      JOIN items i ON i.id = ol.item_id
+      WHERE ol.order_id = ?
+      ORDER BY ol.id
+    `)
+    .all(orderId);
+
+  const lines = orderLines.map((line) => {
+    const requiredScaled = Math.max(0, line.qty_ordered_scaled - line.qty_dispatched_scaled);
+    const availableScaled = getStockBalanceScaled(db, line.item_id);
+    const shortageScaled = Math.max(0, requiredScaled - availableScaled);
+    return {
+      lineId: line.id,
+      itemId: line.item_id,
+      sku: line.sku,
+      itemName: line.item_name,
+      unit: line.unit,
+      requiredQty: fromScaledQty(requiredScaled),
+      requiredQtyScaled: requiredScaled,
+      availableQty: fromScaledQty(availableScaled),
+      availableQtyScaled: availableScaled,
+      shortageQty: fromScaledQty(shortageScaled),
+      shortageQtyScaled: shortageScaled,
+      hasShortage: shortageScaled > 0,
+    };
+  });
+
+  const shortages = lines.filter((l) => l.hasShortage);
+  return {
+    orderId: order.id,
+    orderNumber: order.order_number,
+    status: order.status,
+    hasShortage: shortages.length > 0,
+    shortages,
+    lines,
+  };
+}
+
+export function approveOrder(db, { orderId, allowShortage = false, actorUserId = null }) {
+  const runTx = db.transaction(() => {
+    const before = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    if (!before) {
+      throw new NotFoundError(`Order not found: ${orderId}`);
+    }
+    if (before.status === 'cancelled' || before.status === 'dispatched') {
+      throw new ValidationError(`Order in status '${before.status}' cannot be approved`);
+    }
+
+    const stockCheck = getOrderStockCheck(db, orderId);
+    if (stockCheck.hasShortage && allowShortage !== true) {
+      throw new ConflictError(
+        'Order has stock shortage; pass allowShortage=true as admin to approve',
+        'STOCK_SHORTAGE',
+        { shortages: stockCheck.shortages, stockCheck }
+      );
+    }
+
+    db.prepare(`
+      UPDATE orders
+      SET status = 'approved',
+          shortage_approved = ?,
+          approved_by = ?,
+          approved_at = datetime('now')
+      WHERE id = ?
+    `).run(stockCheck.hasShortage ? 1 : 0, actorUserId, orderId);
+
+    const after = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+
+    recordAudit(db, {
+      actorUserId,
+      action: 'ORDER_APPROVED',
+      entityType: 'order',
+      entityId: orderId,
+      before,
+      after: {
+        order: after,
+        allowShortage: Boolean(allowShortage),
+        hasShortage: stockCheck.hasShortage,
+        shortages: stockCheck.shortages,
+      },
+    });
+
+    return {
+      order: after,
+      stockCheck,
+      hasShortage: stockCheck.hasShortage,
+      shortages: stockCheck.shortages,
+    };
+  });
+
+  return runTx();
+}
 
 export function createOrder(
   db,
@@ -294,6 +397,26 @@ export function recordPayment(
   }
 
   const runTx = db.transaction(() => {
+    const customer = db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId);
+    if (!customer) {
+      throw new NotFoundError(`Customer not found: ${customerId}`);
+    }
+
+    if (invoiceId !== null) {
+      const inv = db
+        .prepare('SELECT id, customer_id, status FROM invoices WHERE id = ?')
+        .get(invoiceId);
+      if (!inv) {
+        throw new NotFoundError(`Invoice not found: ${invoiceId}`);
+      }
+      if (inv.customer_id !== customerId) {
+        throw new ValidationError('Invoice does not belong to the specified customer');
+      }
+      if (inv.status === 'cancelled') {
+        throw new ValidationError('Cannot record payment against a cancelled invoice');
+      }
+    }
+
     const resolvedNumber = paymentNumber ?? `PAY-${paymentDate.replaceAll('-', '')}-${Date.now()}`;
     const info = db
       .prepare(`

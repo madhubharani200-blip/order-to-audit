@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS production_run_consumptions (
   UNIQUE (production_run_id, item_id)
 );
 
+CREATE TABLE IF NOT EXISTS production_run_overheads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  production_run_id INTEGER NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
+  category TEXT NOT NULL CHECK (category IN ('labour', 'power', 'gas', 'other')),
+  description TEXT,
+  amount_paisa INTEGER NOT NULL CHECK (amount_paisa >= 0),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_prod_overheads_run_id ON production_run_overheads(production_run_id);
+
 CREATE TABLE IF NOT EXISTS stock_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL REFERENCES items(id),
@@ -199,7 +211,12 @@ CREATE TABLE IF NOT EXISTS orders (
   order_number TEXT NOT NULL UNIQUE,
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   order_date TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('draft', 'confirmed', 'partially_dispatched', 'dispatched', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'confirmed' CHECK (
+    status IN ('draft', 'pending', 'approved', 'confirmed', 'partially_dispatched', 'dispatched', 'cancelled')
+  ),
+  shortage_approved INTEGER NOT NULL DEFAULT 0 CHECK (shortage_approved IN (0, 1)),
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT,
   total_amount_paisa INTEGER NOT NULL DEFAULT 0 CHECK (total_amount_paisa >= 0),
   notes TEXT,
   created_by INTEGER REFERENCES users(id),

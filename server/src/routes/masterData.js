@@ -3,6 +3,7 @@ import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { fromScaledQty, toScaledQty } from '../lib/units.js';
 import { ALL_ROLES, requireRole } from '../middleware/auth.js';
 import { recordAudit } from '../services/audit.js';
+import { getCustomerOutstanding } from '../services/receivables.js';
 
 function formatItem(row) {
   if (!row) return null;
@@ -249,6 +250,16 @@ export function createCustomersRouter(db) {
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(req.params.id));
     if (!customer) return next(new NotFoundError('Customer not found'));
     return res.json({ customer });
+  });
+
+  router.get('/:id/outstanding', requireRole(...ALL_ROLES), (req, res, next) => {
+    try {
+      const asOfDate = req.query.asOfDate || new Date().toISOString().slice(0, 10);
+      const report = getCustomerOutstanding(db, Number(req.params.id), asOfDate);
+      return res.json(report);
+    } catch (err) {
+      return next(err);
+    }
   });
 
   router.post('/', requireRole('admin'), (req, res, next) => {

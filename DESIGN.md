@@ -28,3 +28,8 @@
 | **Inventory Ledger** | `stock_ledger`, `v_stock_balance` | Immutable movement log and live balance view derived strictly by `SUM(qty_scaled)`. |
 | **Sales & GST Invoicing** | `customers`, `orders`, `order_lines`, `invoices`, `invoice_lines`, `payments` | Customer GSTIN & state tracking, order fulfillment, financial-year sequential invoice numbering (`INV/YYYY-YY/NNNN`), intra-state (`CGST` + `SGST`) vs. inter-state (`IGST`) tax split by HSN, and payment tracking. |
 | **Audit Trail** | `audit_log` | Immutable JSON before/after log of operational actions with actor and reason. |
+
+## Costing Method
+
+- **Weighted Average Material Costing**: Raw and packaging materials issued to a production run are valued at perpetual weighted average cost computed directly from `stock_ledger` chronologically (`ORDER BY id ASC`) up to the run's issue entries. Each inflow (`opening`, `purchase`) adds `qty_scaled` and exact `qty * unit_cost_paisa` to the running pool; earlier outflows deduct proportionally at the then-current pool average so the unit rate only shifts when stock is received at a new rate (e.g. `100 kg @ Rs 42` + `60 kg @ Rs 45` yields `160 kg` valued at `Rs 6,900` = `Rs 43.125/kg`, so issuing `40 kg` costs exactly `Rs 1,725.00` without intermediate unit-rate rounding error).
+- **Direct Overhead Allocation**: Run overheads (`labour`, `power`, `gas`, `other` recorded in integer paisa in `production_run_overheads`) are charged 100% to that run's good output (`actual_good_yield_scaled`). Cost per good packet is `round((material_cost_paisa + overheads_paisa) / good_packets)` in integer paisa, and margin is computed against the finished item's selling price.

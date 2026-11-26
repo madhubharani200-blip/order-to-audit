@@ -11,6 +11,7 @@ import {
 } from './routes/masterData.js';
 import { createProductionRunsRouter } from './routes/productionRuns.js';
 import { createPurchasesRouter } from './routes/purchases.js';
+import { createReportsRouter } from './routes/reports.js';
 import { createInvoicesRouter, createOrdersRouter, createPaymentsRouter } from './routes/sales.js';
 import { createStockRouter } from './routes/stock.js';
 
@@ -36,6 +37,7 @@ export function createApp({ db, jwtSecret = process.env.JWT_SECRET || DEFAULT_JW
   app.use('/orders', authMiddleware, createOrdersRouter(db));
   app.use('/invoices', authMiddleware, createInvoicesRouter(db));
   app.use('/payments', authMiddleware, createPaymentsRouter(db));
+  app.use('/reports', authMiddleware, createReportsRouter(db));
   app.use('/audit-log', authMiddleware, createAuditRouter(db));
   app.use('/company-settings', authMiddleware, createCompanySettingsRouter(db));
 
