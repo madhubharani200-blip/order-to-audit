@@ -1,6 +1,11 @@
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import express from 'express';
 import { errorHandler } from './lib/errors.js';
 import { authenticate, DEFAULT_JWT_SECRET } from './middleware/auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { createAuditRouter, createCompanySettingsRouter } from './routes/audit.js';
 import { createAuthRouter } from './routes/auth.js';
 import {
@@ -18,6 +23,12 @@ import { createStockRouter } from './routes/stock.js';
 export function createApp({ db, jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET }) {
   const app = express();
   app.use(express.json());
+
+  // Serve static UI from /server/public
+  const publicDir = join(__dirname, '..', 'public');
+  app.use(express.static(publicDir));
+  // Redirect / to login.html
+  app.get('/', (_req, res) => res.redirect('/login.html'));
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });

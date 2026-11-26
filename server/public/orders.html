@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orders — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"></nav>
+  <div id="offline-banner" class="offline-banner"></div>
+
+  <div class="container">
+    <h1>📦 New Order</h1>
+
+    <!-- Order form -->
+    <div class="card" id="orderFormCard">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="customerSelect">Customer</label>
+          <select id="customerSelect"><option value="">Loading…</option></select>
+        </div>
+        <div class="form-group">
+          <label for="orderDate">Order Date</label>
+          <input type="date" id="orderDate">
+        </div>
+      </div>
+
+      <h3>Line Items</h3>
+      <div id="orderLines"></div>
+      <button class="btn btn-outline btn-sm mt-1" onclick="addLine()">+ Add Product</button>
+
+      <div class="order-total mt-2">
+        Total: <span id="orderTotal">₹0.00</span>
+      </div>
+
+      <div id="orderError" class="alert alert-error hidden"></div>
+      <div id="orderSuccess" class="alert alert-success hidden"></div>
+      <button class="btn btn-primary mt-1" id="submitOrder" onclick="submitOrder()">Submit Order</button>
+    </div>
+
+    <!-- My orders list -->
+    <h2>My Orders</h2>
+    <div id="myOrders" class="card"><p class="text-secondary">Loading…</p></div>
+
+    <!-- Customer-wise sales -->
+    <h2>My Sales Summary</h2>
+    <div id="salesSummary" class="card"><p class="text-secondary">Loading…</p></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const user = requireAuth(['salesman','admin','owner']);
+    if (!user) throw new Error('redirect');
+
+    let customers = [];
+    let products = [];
+    let prices = [];
+    let lineCount = 0;
+
+    async function loadData() {
+      try {
+        const [custRes, itemRes, priceRes] = await Promise.all([
+          apiJSON('/customers'),
+          apiJSON('/items'),
+          apiJSON('/price-list'),
+        ]);
+        customers = custRes.customers || [];
+        products = (itemRes.items || []).filter(i => i.itemType === 'finished');
+        prices = priceRes.priceList || [];
+
+        const sel = document.getElementById('customerSelect');
+        sel.innerHTML = '<option value="">— Select customer —</option>' +
+          customers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
+
+        document.getElementById('orderDate').value = new Date().toISOString().slice(0,10);
+        addLine();
+      } catch (err) {
+        showOffline('Failed to load data: ' + err.message);
+      }
+    }
+
+    function getPrice(itemId, customerId) {
+      // customer-specific first, then default
+      const cust = prices.find(p => p.item_id === itemId && p.customer_id === Number(customerId) && p.is_active);
+      if (cust) return cust.price_paisa;
+      const def = prices.find(p => p.item_id === itemId && !p.customer_id && p.is_active);
+      return def ? def.price_paisa : 0;
+    }
+
+    function addLine() {
+      lineCount++;
+      const div = document.createElement('div');
+      div.className = 'order-line';
+      div.id = `line-${lineCount}`;
+      div.innerHTML = `
+        <select data-field="item" onchange="recalc()">
+          <option value="">— Product —</option>
+          ${products.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+        </select>
+        <input type="number" data-field="qty" placeholder="Qty" min="1" value="1" style="max-width:80px" oninput="recalc()">
+        <span data-field="price" class="text-secondary" style="min-width:80px;white-space:nowrap">₹0</span>
+        <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove();recalc()">✕</button>
+      `;
+      document.getElementById('orderLines').appendChild(div);
+    }
+
+    function recalc() {
+      const custId = document.getElementById('customerSelect').value;
+      let total = 0;
+      document.querySelectorAll('#orderLines .order-line').forEach(line => {
+        const itemId = Number(line.querySelector('[data-field=item]').value);
+        const qty = Number(line.querySelector('[data-field=qty]').value) || 0;
+        const pricePaisa = getPrice(itemId, custId);
+        const lineTotal = pricePaisa * qty;
+        line.querySelector('[data-field=price]').textContent = fmtRs(lineTotal);
+        total += lineTotal;
+      });
+      // Add 5% GST
+      const gst = Math.round(total * 0.05);
+      document.getElementById('orderTotal').textContent = fmtRs(total + gst) + ` (incl. 5% GST ${fmtRs(gst)})`;
+    }
+
+    async function submitOrder() {
+      const errEl = document.getElementById('orderError');
+      const sucEl = document.getElementById('orderSuccess');
+      errEl.classList.add('hidden');
+      sucEl.classList.add('hidden');
+
+      const customerId = Number(document.getElementById('customerSelect').value);
+      const orderDate = document.getElementById('orderDate').value;
+      if (!customerId) { errEl.textContent = 'Please select a customer'; errEl.classList.remove('hidden'); return; }
+
+      const lines = [];
+      document.querySelectorAll('#orderLines .order-line').forEach(line => {
+        const itemId = Number(line.querySelector('[data-field=item]').value);
+        const qty = Number(line.querySelector('[data-field=qty]').value) || 0;
+        if (itemId && qty > 0) lines.push({ itemId, qty });
+      });
+      if (!lines.length) { errEl.textContent = 'Add at least one product'; errEl.classList.remove('hidden'); return; }
+
+      const orderNumber = `ORD-${Date.now()}`;
+      try {
+        const res = await apiJSON('/orders', {
+          method: 'POST',
+          body: JSON.stringify({ orderNumber, customerId, orderDate, lines }),
+        });
+        sucEl.textContent = `Order ${res.order?.id || ''} created successfully!`;
+        sucEl.classList.remove('hidden');
+        loadOrders();
+      } catch (err) {
+        showOffline(err.message);
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+      }
+    }
+
+    async function loadOrders() {
+      try {
+        const data = await apiJSON('/orders');
+        const orders = data.orders || [];
+        document.getElementById('myOrders').innerHTML = buildTable(orders, [
+          { key: 'id', label: '#' },
+          { key: 'order_number', label: 'Order #' },
+          { key: 'order_date', label: 'Date' },
+          { label: 'Amount', num: true, render: r => fmtRs(r.total_amount_paisa) },
+          { label: 'Status', render: r => statusBadge(r.status) },
+        ], { empty: 'No orders yet' });
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    async function loadSalesSummary() {
+      try {
+        const data = await apiJSON('/reports/sales-register');
+        const rows = data.data || [];
+        document.getElementById('salesSummary').innerHTML = buildTable(rows, [
+          { key: 'invoiceNumber', label: 'Invoice' },
+          { key: 'invoiceDate', label: 'Date' },
+          { key: 'customerName', label: 'Customer' },
+          { label: 'Total', num: true, render: r => fmtRs(r.grandTotalPaisa) },
+          { label: 'Status', render: r => statusBadge(r.status) },
+        ], { empty: 'No sales yet' });
+      } catch {
+        document.getElementById('salesSummary').innerHTML = '<p class="text-secondary">Could not load sales</p>';
+      }
+    }
+
+    loadData();
+    loadOrders();
+    loadSalesSummary();
+
+    document.getElementById('customerSelect').addEventListener('change', recalc);
+  </script>
+</body>
+</html>

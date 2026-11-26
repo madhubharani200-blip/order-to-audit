@@ -1,0 +1,123 @@
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f6fa;--surface:#fff;--primary:#1a73e8;--primary-dark:#1558b0;
+  --danger:#d93025;--success:#1e8e3e;--warning:#f9ab00;
+  --text:#202124;--text-secondary:#5f6368;--border:#dadce0;
+  --radius:8px;--shadow:0 1px 3px rgba(0,0,0,.12);
+  --nav-h:52px;
+}
+html{font-size:15px}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+
+/* ── Nav bar ──────────────────────────────────────────────────────────── */
+nav.top-bar{
+  position:sticky;top:0;z-index:100;display:flex;align-items:center;
+  height:var(--nav-h);padding:0 16px;background:var(--primary);color:#fff;
+  gap:12px;box-shadow:0 2px 4px rgba(0,0,0,.18);
+}
+nav.top-bar .brand{font-weight:700;font-size:1.05rem;white-space:nowrap}
+nav.top-bar .spacer{flex:1}
+nav.top-bar a{color:#fff;text-decoration:none;font-size:.88rem;padding:6px 10px;border-radius:var(--radius);transition:background .15s}
+nav.top-bar a:hover{background:rgba(255,255,255,.18)}
+nav.top-bar a.active{background:rgba(255,255,255,.24);font-weight:600}
+nav.top-bar button#logoutBtn{background:none;border:1px solid rgba(255,255,255,.5);color:#fff;padding:5px 12px;border-radius:var(--radius);cursor:pointer;font-size:.85rem}
+nav.top-bar button#logoutBtn:hover{background:rgba(255,255,255,.18)}
+
+/* ── Layout ───────────────────────────────────────────────────────────── */
+.container{max-width:960px;margin:0 auto;padding:16px}
+.container.wide{max-width:1200px}
+h1{font-size:1.4rem;margin-bottom:12px}
+h2{font-size:1.15rem;margin:18px 0 8px;color:var(--text-secondary)}
+
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.card h3{font-size:1rem;margin-bottom:8px}
+
+/* ── Tables ───────────────────────────────────────────────────────────── */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+th{background:#f1f3f4;font-weight:600;position:sticky;top:0;z-index:1}
+tr:hover{background:#f8f9fa}
+td.num,th.num{text-align:right}
+
+/* ── Forms ────────────────────────────────────────────────────────────── */
+label{display:block;font-weight:600;margin-bottom:4px;font-size:.88rem}
+input,select,textarea{
+  width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius);
+  font-size:.92rem;outline:none;transition:border .15s;
+}
+input:focus,select:focus{border-color:var(--primary)}
+.form-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.form-row>*{flex:1;min-width:140px}
+.form-group{margin-bottom:12px}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;gap:5px;padding:8px 18px;border:none;
+  border-radius:var(--radius);cursor:pointer;font-size:.88rem;font-weight:600;transition:background .15s;
+}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-danger:hover{background:#b71c1c}
+.btn-success{background:var(--success);color:#fff}
+.btn-success:hover{background:#137333}
+.btn-warning{background:var(--warning);color:#333}
+.btn-outline{background:none;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{background:#f1f3f4}
+.btn-sm{padding:5px 12px;font-size:.82rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Badges ───────────────────────────────────────────────────────────── */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.78rem;font-weight:600}
+.badge-green{background:#e6f4ea;color:#137333}
+.badge-yellow{background:#fef7e0;color:#b06000}
+.badge-red{background:#fce8e6;color:#c5221f}
+.badge-blue{background:#e8f0fe;color:#1a73e8}
+.badge-grey{background:#f1f3f4;color:#5f6368}
+
+/* ── Alerts ───────────────────────────────────────────────────────────── */
+.alert{padding:12px 16px;border-radius:var(--radius);margin-bottom:12px;font-size:.9rem}
+.alert-error{background:#fce8e6;color:#c5221f;border:1px solid #f5c6cb}
+.alert-success{background:#e6f4ea;color:#137333;border:1px solid #c3e6cb}
+.alert-info{background:#e8f0fe;color:#1a73e8;border:1px solid #d2e3fc}
+.alert-warning{background:#fef7e0;color:#b06000;border:1px solid #feefc3}
+.offline-banner{
+  display:none;position:fixed;bottom:0;left:0;right:0;
+  padding:10px;background:#d93025;color:#fff;text-align:center;font-weight:600;z-index:200;
+}
+.offline-banner.show{display:block}
+
+/* ── Utilities ────────────────────────────────────────────────────────── */
+.mt-1{margin-top:8px}.mt-2{margin-top:16px}.mb-1{margin-bottom:8px}.mb-2{margin-bottom:16px}
+.text-right{text-align:right}.text-center{text-align:center}
+.text-secondary{color:var(--text-secondary)}.text-danger{color:var(--danger)}
+.flex{display:flex}.gap-1{gap:8px}.gap-2{gap:16px}.items-center{align-items:center}
+.justify-between{justify-content:space-between}.flex-wrap{flex-wrap:wrap}
+.hidden{display:none!important}
+.loading{opacity:.5;pointer-events:none}
+
+/* ── Login card ───────────────────────────────────────────────────────── */
+.login-wrap{display:flex;justify-content:center;align-items:center;min-height:calc(100vh - var(--nav-h))}
+.login-card{width:100%;max-width:380px;padding:28px;border-radius:12px;background:var(--surface);box-shadow:0 4px 16px rgba(0,0,0,.12)}
+.login-card h1{text-align:center;margin-bottom:20px}
+
+/* ── Phone-first order form ───────────────────────────────────────────── */
+.order-line{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px}
+.order-line input,.order-line select{flex:1}
+.order-line .btn{flex:0 0 auto}
+.order-total{font-size:1.2rem;font-weight:700;padding:10px 0}
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media(max-width:600px){
+  .container{padding:10px}
+  .form-row{flex-direction:column}
+  nav.top-bar{padding:0 8px;gap:6px}
+  nav.top-bar a{font-size:.78rem;padding:5px 6px}
+  nav.top-bar .brand{font-size:.92rem}
+  h1{font-size:1.2rem}
+  table{font-size:.8rem}
+  th,td{padding:6px 6px}
+}

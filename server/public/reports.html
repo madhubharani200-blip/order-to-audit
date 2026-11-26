@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"></nav>
+  <div id="offline-banner" class="offline-banner"></div>
+
+  <div class="container wide">
+    <h1>📊 Reports</h1>
+
+    <!-- Report picker -->
+    <div class="card">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="reportSelect">Report</label>
+          <select id="reportSelect">
+            <option value="sales-register">Sales Register</option>
+            <option value="customer-sales">Customer-wise Sales</option>
+            <option value="product-sales">Product-wise Sales</option>
+            <option value="gst-summary">GST Summary</option>
+            <option value="purchase-register">Purchase Register</option>
+            <option value="stock-summary">Stock Summary</option>
+            <option value="stock-ledger">Stock Ledger</option>
+            <option value="production">Production Report</option>
+            <option value="payments">Payments &amp; Collections</option>
+            <option value="outstanding">Outstanding with Ageing</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="fromDate">From</label>
+          <input type="date" id="fromDate">
+        </div>
+        <div class="form-group">
+          <label for="toDate">To</label>
+          <input type="date" id="toDate">
+        </div>
+        <div class="form-group" style="align-self:flex-end">
+          <button class="btn btn-primary" onclick="loadReport()">Load</button>
+          <button class="btn btn-outline btn-sm" onclick="download('csv')">CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="download('xlsx')">XLSX</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Report output -->
+    <div class="card" id="reportOutput"><p class="text-secondary">Select a report and click Load</p></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const user = requireAuth(['auditor','owner','admin']);
+    if (!user) throw new Error('redirect');
+
+    let currentReport = 'sales-register';
+    let currentData = [];
+
+    // Column definitions per report
+    const REPORT_COLS = {
+      'sales-register': [
+        { key: 'invoiceNumber', label: 'Invoice' },
+        { key: 'invoiceDate', label: 'Date' },
+        { key: 'customerName', label: 'Customer' },
+        { key: 'supplyType', label: 'Supply' },
+        { label: 'Taxable', num: true, render: r => fmtRs(r.subtotalPaisa) },
+        { label: 'CGST', num: true, render: r => fmtRs(r.cgstPaisa) },
+        { label: 'SGST', num: true, render: r => fmtRs(r.sgstPaisa) },
+        { label: 'IGST', num: true, render: r => fmtRs(r.igstPaisa) },
+        { label: 'Total', num: true, render: r => `<strong>${fmtRs(r.grandTotalPaisa)}</strong>` },
+        { label: 'Status', render: r => statusBadge(r.status) },
+      ],
+      'customer-sales': [
+        { key: 'customerName', label: 'Customer' },
+        { key: 'state', label: 'State' },
+        { label: 'Invoices', num: true, render: r => r.invoiceCount },
+        { label: 'Taxable', num: true, render: r => fmtRs(r.subtotalPaisa) },
+        { label: 'Total', num: true, render: r => fmtRs(r.grandTotalPaisa) },
+      ],
+      'product-sales': [
+        { key: 'sku', label: 'SKU' },
+        { key: 'itemName', label: 'Product' },
+        { label: 'Qty', num: true, render: r => r.totalQty },
+        { label: 'Taxable', num: true, render: r => fmtRs(r.subtotalPaisa) },
+        { label: 'Total', num: true, render: r => fmtRs(r.grandTotalPaisa) },
+      ],
+      'purchase-register': [
+        { key: 'purchaseNumber', label: 'Purchase #' },
+        { key: 'purchaseDate', label: 'Date' },
+        { key: 'supplierName', label: 'Supplier' },
+        { key: 'sku', label: 'SKU' },
+        { key: 'itemName', label: 'Item' },
+        { label: 'Qty', num: true, render: r => `${r.qty} ${r.unit}` },
+        { label: 'Rate', num: true, render: r => fmtRs(r.ratePaisa) },
+        { label: 'Total', num: true, render: r => fmtRs(r.lineTotalPaisa) },
+      ],
+      'stock-summary': [
+        { key: 'sku', label: 'SKU' },
+        { key: 'name', label: 'Item' },
+        { key: 'itemType', label: 'Type' },
+        { key: 'unit', label: 'Unit' },
+        { label: 'Balance', num: true, render: r => r.balanceQty },
+      ],
+      'stock-ledger': [
+        { key: 'id', label: '#' },
+        { key: 'date', label: 'Date' },
+        { key: 'sku', label: 'SKU' },
+        { key: 'itemName', label: 'Item' },
+        { label: 'Qty', num: true, render: r => `${r.qty} ${r.unit}` },
+        { key: 'sourceType', label: 'Source' },
+        { key: 'sourceId', label: 'Ref' },
+        { key: 'notes', label: 'Notes' },
+      ],
+      'payments': [
+        { key: 'paymentNumber', label: 'Payment #' },
+        { key: 'paymentDate', label: 'Date' },
+        { key: 'customerName', label: 'Customer' },
+        { key: 'paymentMode', label: 'Mode' },
+        { key: 'invoiceNumber', label: 'Invoice' },
+        { label: 'Amount', num: true, render: r => fmtRs(r.amountPaisa) },
+      ],
+    };
+
+    async function loadReport() {
+      currentReport = document.getElementById('reportSelect').value;
+      const from = document.getElementById('fromDate').value;
+      const to = document.getElementById('toDate').value;
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+
+      const outputEl = document.getElementById('reportOutput');
+      outputEl.innerHTML = '<p class="text-secondary">Loading…</p>';
+
+      try {
+        const data = await apiJSON(`/reports/${currentReport}?${params}`);
+
+        // Handle special shapes
+        if (currentReport === 'gst-summary') {
+          renderGstSummary(data);
+          return;
+        }
+        if (currentReport === 'outstanding') {
+          renderOutstanding(data);
+          return;
+        }
+        if (currentReport === 'production') {
+          renderProduction(data);
+          return;
+        }
+
+        currentData = data.data || [];
+        const cols = REPORT_COLS[currentReport] || [{ key: 'id', label: 'ID' }];
+        outputEl.innerHTML = `<p class="text-secondary mb-1">${data.count ?? currentData.length} record(s)</p>` +
+          buildTable(currentData, cols);
+      } catch (err) {
+        outputEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    function renderGstSummary(data) {
+      const el = document.getElementById('reportOutput');
+      let html = '<h3>B2B Invoices (Registered customers)</h3>';
+      html += buildTable(data.b2b || [], [
+        { key: 'customerName', label: 'Customer' },
+        { key: 'customerGstin', label: 'GSTIN' },
+        { key: 'invoiceNumber', label: 'Invoice' },
+        { key: 'hsnCode', label: 'HSN' },
+        { label: 'Taxable', num: true, render: r => fmtRs(r.taxableValuePaisa) },
+        { label: 'CGST', num: true, render: r => fmtRs(r.cgstPaisa) },
+        { label: 'SGST', num: true, render: r => fmtRs(r.sgstPaisa) },
+        { label: 'IGST', num: true, render: r => fmtRs(r.igstPaisa) },
+      ]);
+      html += '<h3 class="mt-2">B2C Invoices (Unregistered)</h3>';
+      html += buildTable(data.b2c || [], [
+        { key: 'customerName', label: 'Customer' },
+        { key: 'hsnCode', label: 'HSN' },
+        { label: 'Taxable', num: true, render: r => fmtRs(r.taxableValuePaisa) },
+        { label: 'CGST', num: true, render: r => fmtRs(r.cgstPaisa) },
+        { label: 'SGST', num: true, render: r => fmtRs(r.sgstPaisa) },
+        { label: 'IGST', num: true, render: r => fmtRs(r.igstPaisa) },
+      ]);
+      if (data.totals) {
+        const t = data.totals;
+        html += `<div class="mt-2"><strong>Totals:</strong> Taxable ${fmtRs(t.totalTaxableValuePaisa)} |
+          CGST ${fmtRs(t.totalCgstPaisa)} | SGST ${fmtRs(t.totalSgstPaisa)} |
+          IGST ${fmtRs(t.totalIgstPaisa)} | Grand Total ${fmtRs(t.grandTotalPaisa)}</div>`;
+      }
+      el.innerHTML = html;
+    }
+
+    function renderOutstanding(data) {
+      const el = document.getElementById('reportOutput');
+      const rows = data.customers || [];
+      el.innerHTML = buildTable(rows, [
+        { key: 'customerName', label: 'Customer' },
+        { label: 'Invoiced', num: true, render: r => fmtRs(r.totalInvoicedPaisa) },
+        { label: 'Paid', num: true, render: r => fmtRs(r.totalPaidPaisa) },
+        { label: 'Outstanding', num: true, render: r => `<strong>${fmtRs(r.totalOutstandingPaisa)}</strong>` },
+        { label: '0-30d', num: true, render: r => fmtRs(r.buckets?.['0-30'] || 0) },
+        { label: '31-60d', num: true, render: r => fmtRs(r.buckets?.['31-60'] || 0) },
+        { label: '61-90d', num: true, render: r => fmtRs(r.buckets?.['61-90'] || 0) },
+        { label: '90+d', num: true, render: r => fmtRs(r.buckets?.['90+'] || 0) },
+      ], { empty: 'No outstanding balances' });
+      if (data.summary) {
+        const s = data.summary;
+        el.innerHTML += `<div class="mt-1"><strong>Summary:</strong>
+          Outstanding ${fmtRs(s.totalOutstandingPaisa)}</div>`;
+      }
+    }
+
+    function renderProduction(data) {
+      const el = document.getElementById('reportOutput');
+      const runs = data.data || [];
+      if (!runs.length) { el.innerHTML = '<p class="text-secondary">No production runs</p>'; return; }
+      let html = '';
+      for (const run of runs) {
+        html += `<div class="mb-2"><strong>${run.runNumber}</strong> — ${run.runDate} — ${run.productName}<br>
+          Expected: ${run.expectedYieldQty} | Good: ${run.actualGoodYieldQty} |
+          Yield Var: ${(run.yieldVarianceBps/100).toFixed(1)}%</div>`;
+      }
+      el.innerHTML = html;
+    }
+
+    function download(fmt) {
+      const report = document.getElementById('reportSelect').value;
+      const from = document.getElementById('fromDate').value;
+      const to = document.getElementById('toDate').value;
+      const params = new URLSearchParams({ format: fmt });
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      // Open in new tab (auth via cookie not supported, so use fetch+blob)
+      api(`/reports/${report}?${params}`).then(async res => {
+        if (!res || !res.ok) { showOffline('Download failed'); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${report}.${fmt}`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    // Auto-load stock summary on open
+    document.getElementById('reportSelect').value = 'stock-summary';
+    loadReport();
+  </script>
+</body>
+</html>

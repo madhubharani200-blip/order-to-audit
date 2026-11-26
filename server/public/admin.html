@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"></nav>
+  <div id="offline-banner" class="offline-banner"></div>
+
+  <div class="container wide">
+    <h1>🛠️ Admin Dashboard</h1>
+
+    <!-- Incoming orders -->
+    <div class="card">
+      <h3>Incoming Orders</h3>
+      <div id="ordersList"><p class="text-secondary">Loading…</p></div>
+    </div>
+
+    <!-- Order detail panel (shown on click) -->
+    <div class="card hidden" id="orderDetail">
+      <div class="flex justify-between items-center mb-1">
+        <h3>Order <span id="detailOrderNum"></span></h3>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('orderDetail').classList.add('hidden')">✕ Close</button>
+      </div>
+      <div id="stockCheckResult"></div>
+      <div class="flex gap-1 flex-wrap mt-2" id="detailActions"></div>
+      <div id="detailMsg" class="mt-1"></div>
+    </div>
+
+    <!-- Customer outstanding -->
+    <h2>Customer Outstanding</h2>
+    <div class="card" id="outstandingSection"><p class="text-secondary">Loading…</p></div>
+
+    <!-- Quick payment form -->
+    <div class="card">
+      <h3>Record Payment</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="payCustId">Customer</label>
+          <select id="payCustId"><option value="">Loading…</option></select>
+        </div>
+        <div class="form-group">
+          <label for="payInvId">Invoice ID</label>
+          <input type="number" id="payInvId" placeholder="Invoice ID">
+        </div>
+        <div class="form-group">
+          <label for="payAmt">Amount (₹)</label>
+          <input type="number" id="payAmt" step="0.01" placeholder="e.g. 4000">
+        </div>
+        <div class="form-group">
+          <label for="payMode">Mode</label>
+          <select id="payMode">
+            <option value="upi">UPI</option>
+            <option value="cash">Cash</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </div>
+      </div>
+      <div id="payMsg"></div>
+      <button class="btn btn-success btn-sm" onclick="recordPayment()">Record Payment</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const user = requireAuth(['admin','owner']);
+    if (!user) throw new Error('redirect');
+
+    let allCustomers = [];
+    let allOrders = [];
+
+    async function loadAll() {
+      try {
+        const [ordData, custData] = await Promise.all([
+          apiJSON('/orders'),
+          apiJSON('/customers'),
+        ]);
+        allOrders = ordData.orders || [];
+        allCustomers = custData.customers || [];
+
+        renderOrders();
+        renderCustomerSelect();
+        loadOutstanding();
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    function renderOrders() {
+      document.getElementById('ordersList').innerHTML = buildTable(allOrders, [
+        { key: 'id', label: '#' },
+        { key: 'order_number', label: 'Order' },
+        { key: 'order_date', label: 'Date' },
+        { label: 'Amount', num: true, render: r => fmtRs(r.total_amount_paisa) },
+        { label: 'Status', render: r => statusBadge(r.status) },
+        { label: '', render: r => `<button class="btn btn-outline btn-sm" onclick="showOrder(${r.id})">Details</button>` },
+      ], { empty: 'No orders' });
+    }
+
+    function renderCustomerSelect() {
+      const sel = document.getElementById('payCustId');
+      sel.innerHTML = '<option value="">— Customer —</option>' +
+        allCustomers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    }
+
+    async function showOrder(orderId) {
+      const panel = document.getElementById('orderDetail');
+      panel.classList.remove('hidden');
+      const order = allOrders.find(o => o.id === orderId);
+      document.getElementById('detailOrderNum').textContent = order ? order.order_number : orderId;
+      document.getElementById('stockCheckResult').innerHTML = '<p>Loading stock check…</p>';
+      document.getElementById('detailActions').innerHTML = '';
+      document.getElementById('detailMsg').innerHTML = '';
+
+      try {
+        const check = await apiJSON(`/orders/${orderId}/stock-check`);
+        const lines = check.lines || [];
+        document.getElementById('stockCheckResult').innerHTML = buildTable(lines, [
+          { key: 'sku', label: 'SKU' },
+          { key: 'itemName', label: 'Product' },
+          { label: 'Required', num: true, render: r => r.requiredQty },
+          { label: 'Available', num: true, render: r => r.availableQty },
+          { label: 'Shortage', num: true, render: r => r.hasShortage ?
+            `<span class="text-danger">${r.shortageQty}</span>` : '—' },
+        ]);
+
+        const status = order?.status;
+        const acts = document.getElementById('detailActions');
+        let html = '';
+
+        if (['pending','confirmed','draft'].includes(status)) {
+          if (check.hasShortage) {
+            html += `<button class="btn btn-warning btn-sm" onclick="approveOrder(${orderId}, true)">Approve (allow shortage)</button>`;
+          } else {
+            html += `<button class="btn btn-success btn-sm" onclick="approveOrder(${orderId}, false)">Approve</button>`;
+          }
+        }
+        if (['approved','confirmed','partially_dispatched'].includes(status)) {
+          html += `<button class="btn btn-primary btn-sm" onclick="dispatchOrder(${orderId})">Dispatch &amp; Invoice</button>`;
+        }
+        acts.innerHTML = html;
+      } catch (err) {
+        document.getElementById('stockCheckResult').innerHTML =
+          `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    async function approveOrder(orderId, allowShortage) {
+      if (allowShortage && !confirm('There is a stock shortage. Approve anyway?')) return;
+      const msgEl = document.getElementById('detailMsg');
+      try {
+        await apiJSON(`/orders/${orderId}/approve`, {
+          method: 'POST',
+          body: JSON.stringify({ allowShortage }),
+        });
+        msgEl.innerHTML = '<div class="alert alert-success">Order approved!</div>';
+        loadAll();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    async function dispatchOrder(orderId) {
+      const msgEl = document.getElementById('detailMsg');
+      try {
+        // Get order lines to build invoice lines
+        const ordDetail = await apiJSON(`/orders/${orderId}`);
+        const order = ordDetail.order;
+        const oLines = ordDetail.lines || [];
+
+        const lines = oLines.map(l => ({ itemId: l.item_id, qty: l.qty_scaled / 1_000_000 }));
+        const inv = await apiJSON('/invoices', {
+          method: 'POST',
+          body: JSON.stringify({
+            customerId: order.customer_id,
+            orderId,
+            invoiceDate: new Date().toISOString().slice(0,10),
+            lines,
+          }),
+        });
+        const invoice = inv.invoice;
+        msgEl.innerHTML = `
+          <div class="alert alert-success">
+            Invoice ${invoice.invoiceNumber} created — ${fmtRs(invoice.grandTotalPaisa)}
+            <div class="mt-1 flex gap-1">
+              <button class="btn btn-outline btn-sm" onclick="downloadPdf(${invoice.id})">📄 PDF</button>
+              <button class="btn btn-outline btn-sm" onclick="shareInvoice(${invoice.id})">📤 Share</button>
+            </div>
+          </div>`;
+        loadAll();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    async function downloadPdf(invoiceId) {
+      try {
+        const res = await api(`/invoices/${invoiceId}/pdf`);
+        if (!res || !res.ok) { showOffline('PDF download failed'); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    async function shareInvoice(invoiceId) {
+      try {
+        const links = await apiJSON(`/invoices/${invoiceId}/share`);
+        const html = `<div class="alert alert-info">
+          <a href="${links.whatsappLink}" target="_blank" class="btn btn-success btn-sm">WhatsApp</a>
+          <a href="${links.mailtoLink}" class="btn btn-outline btn-sm">Email</a>
+        </div>`;
+        document.getElementById('detailMsg').innerHTML += html;
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    async function loadOutstanding() {
+      try {
+        const data = await apiJSON('/reports/outstanding?onlyWithBalance=true');
+        const rows = data.customers || [];
+        document.getElementById('outstandingSection').innerHTML = buildTable(rows, [
+          { key: 'customerName', label: 'Customer' },
+          { label: 'Invoiced', num: true, render: r => fmtRs(r.totalInvoicedPaisa) },
+          { label: 'Paid', num: true, render: r => fmtRs(r.totalPaidPaisa) },
+          { label: 'Outstanding', num: true, render: r => `<strong>${fmtRs(r.totalOutstandingPaisa)}</strong>` },
+          { label: '0-30d', num: true, render: r => fmtRs(r.buckets?.['0-30'] || 0) },
+          { label: '31-60d', num: true, render: r => fmtRs(r.buckets?.['31-60'] || 0) },
+          { label: '61-90d', num: true, render: r => fmtRs(r.buckets?.['61-90'] || 0) },
+          { label: '90+d', num: true, render: r => fmtRs(r.buckets?.['90+'] || 0) },
+        ], { empty: 'No outstanding balances' });
+      } catch {
+        document.getElementById('outstandingSection').innerHTML =
+          '<p class="text-secondary">Could not load outstanding data</p>';
+      }
+    }
+
+    async function recordPayment() {
+      const msgEl = document.getElementById('payMsg');
+      const custId = Number(document.getElementById('payCustId').value);
+      const invoiceId = Number(document.getElementById('payInvId').value) || null;
+      const amtRs = parseFloat(document.getElementById('payAmt').value) || 0;
+      const mode = document.getElementById('payMode').value;
+
+      if (!custId || amtRs <= 0) {
+        msgEl.innerHTML = '<div class="alert alert-error">Customer and amount are required</div>';
+        return;
+      }
+
+      try {
+        await apiJSON('/payments', {
+          method: 'POST',
+          body: JSON.stringify({
+            paymentNumber: `PAY-${Date.now()}`,
+            customerId: custId,
+            invoiceId,
+            paymentDate: new Date().toISOString().slice(0,10),
+            amountPaisa: Math.round(amtRs * 100),
+            paymentMode: mode,
+          }),
+        });
+        msgEl.innerHTML = '<div class="alert alert-success">Payment recorded!</div>';
+        document.getElementById('payAmt').value = '';
+        loadOutstanding();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>

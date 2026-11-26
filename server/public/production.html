@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Production — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"></nav>
+  <div id="offline-banner" class="offline-banner"></div>
+
+  <div class="container">
+    <h1>🏭 Production Runs</h1>
+
+    <!-- Production report -->
+    <div class="card" id="productionReport"><p class="text-secondary">Loading…</p></div>
+
+    <!-- Stock summary -->
+    <h2>Current Stock</h2>
+    <div class="card" id="stockSummary"><p class="text-secondary">Loading…</p></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const user = requireAuth(['production','admin','owner']);
+    if (!user) throw new Error('redirect');
+
+    async function loadProduction() {
+      try {
+        const data = await apiJSON('/reports/production');
+        const runs = data.data || [];
+        if (!runs.length) {
+          document.getElementById('productionReport').innerHTML = '<p class="text-secondary">No production runs yet</p>';
+          return;
+        }
+        let html = '';
+        for (const run of runs) {
+          const yieldClass = Math.abs(run.yieldVarianceBps) > 300 ? 'text-danger' : '';
+          html += `<div class="mb-2">
+            <div class="flex justify-between items-center">
+              <strong>${run.runNumber}</strong>
+              <span class="text-secondary">${run.runDate}</span>
+            </div>
+            <p>${run.productName} — Expected: ${run.expectedYieldQty} | Good: ${run.actualGoodYieldQty}
+              | Yield: <span class="${yieldClass}">${(run.yieldVarianceBps/100).toFixed(1)}%</span></p>`;
+          if (run.consumptions && run.consumptions.length) {
+            html += buildTable(run.consumptions, [
+              { key: 'itemName', label: 'Material' },
+              { label: 'Expected', num: true, render: c => c.expectedQty },
+              { label: 'Actual', num: true, render: c => c.actualQty },
+              { label: 'Damaged', num: true, render: c => c.damagedQty || '—' },
+              { label: 'Variance', num: true, render: c => {
+                const cls = c.flagged ? 'text-danger' : '';
+                return `<span class="${cls}">${(c.varianceBps/100).toFixed(1)}%</span>`;
+              }},
+            ]);
+          }
+          html += '</div><hr>';
+        }
+        document.getElementById('productionReport').innerHTML = html;
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    async function loadStock() {
+      try {
+        const data = await apiJSON('/reports/stock-summary');
+        const rows = data.data || [];
+        document.getElementById('stockSummary').innerHTML = buildTable(rows, [
+          { key: 'sku', label: 'SKU' },
+          { key: 'name', label: 'Item' },
+          { key: 'itemType', label: 'Type' },
+          { label: 'Balance', num: true, render: r => `${r.balanceQty} ${r.unit}` },
+        ]);
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    loadProduction();
+    loadStock();
+  </script>
+</body>
+</html>

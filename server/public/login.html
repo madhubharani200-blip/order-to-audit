@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"><span class="brand">Kaveri Crunch Foods</span></nav>
+
+  <div class="login-wrap">
+    <div class="login-card card">
+      <h1>🔐 Login</h1>
+      <div id="error" class="alert alert-error hidden"></div>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" autocomplete="username" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px">Sign In</button>
+      </form>
+      <p class="text-secondary text-center mt-2" style="font-size:.82rem">
+        Default accounts: admin1 / sales1 / prod1 / audit1 / owner1<br>Password: password123
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // If already logged in, redirect
+    (function() {
+      const token = localStorage.getItem('token');
+      const user = (() => { try { return JSON.parse(localStorage.getItem('user')); } catch { return null; } })();
+      if (token && user) redirectByRole(user.role);
+    })();
+
+    function redirectByRole(role) {
+      const map = {
+        salesman: 'orders.html',
+        admin: 'admin.html',
+        production: 'production.html',
+        auditor: 'reports.html',
+        owner: 'reports.html',
+      };
+      location.href = map[role] || 'orders.html';
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('error');
+      errEl.classList.add('hidden');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.message || 'Login failed');
+
+        localStorage.setItem('token', body.token);
+        localStorage.setItem('user', JSON.stringify(body.user));
+        redirectByRole(body.user.role);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
