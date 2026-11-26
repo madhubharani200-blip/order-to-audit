@@ -5,32 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reports — Kaveri Crunch</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .summary-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-bottom:16px }
+    .summary-card { padding:14px; border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); text-align:center }
+    .summary-card .label { font-size:.8rem; color:var(--text-secondary); margin-bottom:4px }
+    .summary-card .value { font-size:1.3rem; font-weight:700 }
+    .report-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; margin-bottom:16px }
+    .report-card { cursor:pointer; transition:box-shadow .15s }
+    .report-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.15) }
+    .report-card.selected { border:2px solid var(--primary) }
+    .report-card h4 { margin-bottom:4px }
+    .report-card p { font-size:.82rem; color:var(--text-secondary) }
+  </style>
 </head>
 <body>
   <nav class="top-bar" id="top-nav"></nav>
   <div id="offline-banner" class="offline-banner"></div>
 
   <div class="container wide">
-    <h1>📊 Reports</h1>
+    <!-- ── Owner / Admin Summary ───────────────────────────────────── -->
+    <div id="ownerSummary" class="hidden">
+      <h1>📊 Dashboard</h1>
+      <div class="summary-grid" id="summaryGrid"></div>
+    </div>
 
-    <!-- Report picker -->
+    <h1 id="reportsTitle">📊 Reports</h1>
+
+    <!-- ── Report cards ────────────────────────────────────────────── -->
+    <div class="report-cards" id="reportCards"></div>
+
+    <!-- ── Date range + download ───────────────────────────────────── -->
     <div class="card">
       <div class="form-row">
-        <div class="form-group">
-          <label for="reportSelect">Report</label>
-          <select id="reportSelect">
-            <option value="sales-register">Sales Register</option>
-            <option value="customer-sales">Customer-wise Sales</option>
-            <option value="product-sales">Product-wise Sales</option>
-            <option value="gst-summary">GST Summary</option>
-            <option value="purchase-register">Purchase Register</option>
-            <option value="stock-summary">Stock Summary</option>
-            <option value="stock-ledger">Stock Ledger</option>
-            <option value="production">Production Report</option>
-            <option value="payments">Payments &amp; Collections</option>
-            <option value="outstanding">Outstanding with Ageing</option>
-          </select>
-        </div>
         <div class="form-group">
           <label for="fromDate">From</label>
           <input type="date" id="fromDate">
@@ -41,14 +47,14 @@
         </div>
         <div class="form-group" style="align-self:flex-end">
           <button class="btn btn-primary" onclick="loadReport()">Load</button>
-          <button class="btn btn-outline btn-sm" onclick="download('csv')">CSV</button>
-          <button class="btn btn-outline btn-sm" onclick="download('xlsx')">XLSX</button>
+          <button class="btn btn-outline btn-sm" onclick="download('csv')">📥 CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="download('xlsx')">📥 XLSX</button>
         </div>
       </div>
     </div>
 
-    <!-- Report output -->
-    <div class="card" id="reportOutput"><p class="text-secondary">Select a report and click Load</p></div>
+    <!-- ── Report output ───────────────────────────────────────────── -->
+    <div class="card" id="reportOutput"><p class="text-secondary">Select a report card above</p></div>
   </div>
 
   <script src="app.js"></script>
@@ -57,9 +63,21 @@
     if (!user) throw new Error('redirect');
 
     let currentReport = 'sales-register';
-    let currentData = [];
 
-    // Column definitions per report
+    /* ── Report definitions ─────────────────────────────────────────── */
+    const REPORTS = [
+      { id: 'sales-register', title: 'Sales Register', icon: '🧾', desc: 'All invoices with GST breakdown' },
+      { id: 'customer-sales', title: 'Customer-wise Sales', icon: '👥', desc: 'Revenue per customer' },
+      { id: 'product-sales', title: 'Product-wise Sales', icon: '📦', desc: 'Revenue per product SKU' },
+      { id: 'gst-summary', title: 'GST Summary', icon: '🏛️', desc: 'GSTR-1/3B: B2B, B2C, HSN-wise' },
+      { id: 'purchase-register', title: 'Purchase Register', icon: '📥', desc: 'All purchases with line items' },
+      { id: 'stock-summary', title: 'Stock Summary', icon: '📊', desc: 'Current balance per item' },
+      { id: 'stock-ledger', title: 'Stock Ledger', icon: '📒', desc: 'Every stock movement with source' },
+      { id: 'production', title: 'Production Report', icon: '🏭', desc: 'Planned vs actual, yield & variance' },
+      { id: 'payments', title: 'Payments & Collections', icon: '💰', desc: 'All payments received' },
+      { id: 'outstanding', title: 'Outstanding / Ageing', icon: '⏳', desc: 'Receivables with 30/60/90+ buckets' },
+    ];
+
     const REPORT_COLS = {
       'sales-register': [
         { key: 'invoiceNumber', label: 'Invoice' },
@@ -109,7 +127,8 @@
         { key: 'date', label: 'Date' },
         { key: 'sku', label: 'SKU' },
         { key: 'itemName', label: 'Item' },
-        { label: 'Qty', num: true, render: r => `${r.qty} ${r.unit}` },
+        { label: 'Qty', num: true, render: r => `${r.qty > 0 ? '+' : ''}${r.qty} ${r.unit}` },
+        { label: 'Unit Cost', num: true, render: r => r.unitCostRs ? `₹${r.unitCostRs}` : '—' },
         { key: 'sourceType', label: 'Source' },
         { key: 'sourceId', label: 'Ref' },
         { key: 'notes', label: 'Notes' },
@@ -124,8 +143,105 @@
       ],
     };
 
+    /* ── Build report cards ─────────────────────────────────────────── */
+    function buildReportCards() {
+      const container = document.getElementById('reportCards');
+      container.innerHTML = REPORTS.map(r => `
+        <div class="card report-card ${r.id === currentReport ? 'selected' : ''}"
+             data-report="${r.id}" onclick="selectReport('${r.id}')">
+          <h4>${r.icon} ${r.title}</h4>
+          <p>${r.desc}</p>
+        </div>
+      `).join('');
+    }
+
+    function selectReport(id) {
+      currentReport = id;
+      document.querySelectorAll('.report-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.report === id);
+      });
+      loadReport();
+    }
+
+    /* ── Owner summary ─────────────────────────────────────────────── */
+    async function loadOwnerSummary() {
+      if (!['owner','admin'].includes(user.role)) return;
+      document.getElementById('ownerSummary').classList.remove('hidden');
+      document.getElementById('reportsTitle').classList.add('hidden');
+
+      const grid = document.getElementById('summaryGrid');
+      grid.innerHTML = '<p class="text-secondary">Loading summary…</p>';
+
+      try {
+        const [orders, stock, outstanding, production] = await Promise.all([
+          apiJSON('/orders').catch(() => ({ orders: [] })),
+          apiJSON('/reports/stock-summary').catch(() => ({ data: [] })),
+          apiJSON('/reports/outstanding?onlyWithBalance=true').catch(() => ({ summary: {} })),
+          apiJSON('/reports/production').catch(() => ({ data: [] })),
+        ]);
+
+        const orderCount = (orders.orders || []).length;
+        const pendingOrders = (orders.orders || []).filter(o =>
+          ['pending','confirmed','draft'].includes(o.status)).length;
+
+        const stockItems = stock.data || [];
+        const fgItem = stockItems.find(r => r.sku === 'FG-MURUKKU-200G');
+        const lowStockCount = stockItems.filter(r => r.balanceQty <= 5 && r.balanceQty >= 0).length;
+
+        const outstandingTotal = outstanding.summary?.totalOutstandingPaisa || 0;
+
+        const runs = production.data || [];
+        const flaggedRuns = runs.filter(r => Math.abs(r.yieldVarianceBps) > 300).length;
+        const latestCost = runs.length ? '—' : '—';
+
+        grid.innerHTML = `
+          <div class="summary-card">
+            <div class="label">Total Orders</div>
+            <div class="value">${orderCount}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Pending Approval</div>
+            <div class="value" style="color:var(--warning)">${pendingOrders}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">FG Stock (Murukku)</div>
+            <div class="value">${fgItem ? fgItem.balanceQty + ' pkt' : '—'}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Low Stock Items</div>
+            <div class="value" style="color:${lowStockCount > 0 ? 'var(--danger)' : 'var(--success)'}">${lowStockCount}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Variance Alerts</div>
+            <div class="value" style="color:${flaggedRuns > 0 ? 'var(--danger)' : 'var(--success)'}">${flaggedRuns} run(s)</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Outstanding</div>
+            <div class="value">${fmtRs(outstandingTotal)}</div>
+          </div>
+        `;
+
+        // Try to load latest run cost
+        if (runs.length) {
+          try {
+            const costData = await apiJSON(`/production-runs/${runs[runs.length - 1].runId}/cost`);
+            const cpp = costData.cost?.costPerPacketPaisa;
+            if (cpp) {
+              grid.innerHTML += `
+                <div class="summary-card">
+                  <div class="label">Cost per Packet</div>
+                  <div class="value">${fmtRs(cpp)}</div>
+                </div>`;
+            }
+          } catch {}
+        }
+      } catch (err) {
+        grid.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    /* ── Load report ───────────────────────────────────────────────── */
     async function loadReport() {
-      currentReport = document.getElementById('reportSelect').value;
       const from = document.getElementById('fromDate').value;
       const to = document.getElementById('toDate').value;
       const params = new URLSearchParams();
@@ -138,24 +254,14 @@
       try {
         const data = await apiJSON(`/reports/${currentReport}?${params}`);
 
-        // Handle special shapes
-        if (currentReport === 'gst-summary') {
-          renderGstSummary(data);
-          return;
-        }
-        if (currentReport === 'outstanding') {
-          renderOutstanding(data);
-          return;
-        }
-        if (currentReport === 'production') {
-          renderProduction(data);
-          return;
-        }
+        if (currentReport === 'gst-summary') { renderGstSummary(data); return; }
+        if (currentReport === 'outstanding') { renderOutstanding(data); return; }
+        if (currentReport === 'production') { renderProduction(data); return; }
 
-        currentData = data.data || [];
+        const rows = data.data || [];
         const cols = REPORT_COLS[currentReport] || [{ key: 'id', label: 'ID' }];
-        outputEl.innerHTML = `<p class="text-secondary mb-1">${data.count ?? currentData.length} record(s)</p>` +
-          buildTable(currentData, cols);
+        outputEl.innerHTML = `<p class="text-secondary mb-1">${data.count ?? rows.length} record(s)</p>` +
+          buildTable(rows, cols);
       } catch (err) {
         outputEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
       }
@@ -218,34 +324,49 @@
       if (!runs.length) { el.innerHTML = '<p class="text-secondary">No production runs</p>'; return; }
       let html = '';
       for (const run of runs) {
+        const yieldClass = Math.abs(run.yieldVarianceBps) > 300 ? 'text-danger' : '';
         html += `<div class="mb-2"><strong>${run.runNumber}</strong> — ${run.runDate} — ${run.productName}<br>
           Expected: ${run.expectedYieldQty} | Good: ${run.actualGoodYieldQty} |
-          Yield Var: ${(run.yieldVarianceBps/100).toFixed(1)}%</div>`;
+          Yield Var: <span class="${yieldClass}">${(run.yieldVarianceBps/100).toFixed(1)}%${
+            Math.abs(run.yieldVarianceBps) > 300 ? ' ⚠️' : ''}</span>`;
+        if (run.consumptions && run.consumptions.length) {
+          html += buildTable(run.consumptions, [
+            { key: 'itemName', label: 'Material' },
+            { label: 'Expected', num: true, render: c => c.expectedQty },
+            { label: 'Actual', num: true, render: c => c.actualQty },
+            { label: 'Damaged', num: true, render: c => c.damagedQty || '—' },
+            { label: 'Variance', num: true, render: c => {
+              const cls = c.flagged ? 'text-danger' : '';
+              return `<span class="${cls}">${(c.varianceBps/100).toFixed(1)}%${c.flagged ? ' ⚠️' : ''}</span>`;
+            }},
+          ]);
+        }
+        html += '</div><hr>';
       }
       el.innerHTML = html;
     }
 
+    /* ── Download ───────────────────────────────────────────────────── */
     function download(fmt) {
-      const report = document.getElementById('reportSelect').value;
       const from = document.getElementById('fromDate').value;
       const to = document.getElementById('toDate').value;
       const params = new URLSearchParams({ format: fmt });
       if (from) params.set('from', from);
       if (to) params.set('to', to);
-      // Open in new tab (auth via cookie not supported, so use fetch+blob)
-      api(`/reports/${report}?${params}`).then(async res => {
+      api(`/reports/${currentReport}?${params}`).then(async res => {
         if (!res || !res.ok) { showOffline('Download failed'); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `${report}.${fmt}`;
+        a.href = url; a.download = `${currentReport}.${fmt}`;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       });
     }
 
-    // Auto-load stock summary on open
-    document.getElementById('reportSelect').value = 'stock-summary';
+    /* ── Init ───────────────────────────────────────────────────────── */
+    buildReportCards();
+    loadOwnerSummary();
     loadReport();
   </script>
 </body>

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stock — Kaveri Crunch</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .tab-bar { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:12px }
+    .tab-bar button { padding:8px 18px; border:none; background:none; cursor:pointer;
+      font-size:.9rem; font-weight:600; color:var(--text-secondary); border-bottom:2px solid transparent; margin-bottom:-2px }
+    .tab-bar button.active { color:var(--primary); border-bottom-color:var(--primary) }
+  </style>
+</head>
+<body>
+  <nav class="top-bar" id="top-nav"></nav>
+  <div id="offline-banner" class="offline-banner"></div>
+
+  <div class="container wide">
+    <h1>📦 Stock</h1>
+
+    <!-- ── Stock Summary with tabs ─────────────────────────────────── -->
+    <div class="card">
+      <div class="tab-bar" id="stockTabs">
+        <button class="active" data-type="all" onclick="switchTab('all')">All</button>
+        <button data-type="raw" onclick="switchTab('raw')">Raw Materials</button>
+        <button data-type="packaging" onclick="switchTab('packaging')">Packaging</button>
+        <button data-type="finished" onclick="switchTab('finished')">Finished Goods</button>
+      </div>
+      <div id="stockTable"><p class="text-secondary">Loading…</p></div>
+    </div>
+
+    <!-- ── Stock Ledger ────────────────────────────────────────────── -->
+    <h2>Stock Ledger</h2>
+    <div class="card">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="ledgerItem">Item (SKU)</label>
+          <select id="ledgerItem"><option value="">All items</option></select>
+        </div>
+        <div class="form-group">
+          <label for="ledgerFrom">From</label>
+          <input type="date" id="ledgerFrom">
+        </div>
+        <div class="form-group">
+          <label for="ledgerTo">To</label>
+          <input type="date" id="ledgerTo">
+        </div>
+        <div class="form-group" style="align-self:flex-end">
+          <button class="btn btn-primary btn-sm" onclick="loadLedger()">Filter</button>
+        </div>
+      </div>
+      <div id="ledgerTable"><p class="text-secondary">Select filters and click Filter, or just click to show all</p></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const user = requireAuth(['admin','production','auditor','owner']);
+    if (!user) throw new Error('redirect');
+
+    let stockRows = [];
+    let activeTab = 'all';
+
+    async function loadStock() {
+      try {
+        const data = await apiJSON('/reports/stock-summary');
+        stockRows = data.data || [];
+        // populate ledger item filter
+        const sel = document.getElementById('ledgerItem');
+        sel.innerHTML = '<option value="">All items</option>' +
+          stockRows.map(r => `<option value="${r.sku}">${r.name} (${r.sku})</option>`).join('');
+        renderStockTab();
+      } catch (err) {
+        showOffline(err.message);
+      }
+    }
+
+    function switchTab(type) {
+      activeTab = type;
+      document.querySelectorAll('#stockTabs button').forEach(b => {
+        b.classList.toggle('active', b.dataset.type === type);
+      });
+      renderStockTab();
+    }
+
+    function renderStockTab() {
+      const filtered = activeTab === 'all' ? stockRows : stockRows.filter(r => r.itemType === activeTab);
+      document.getElementById('stockTable').innerHTML = buildTable(filtered, [
+        { key: 'sku', label: 'SKU' },
+        { key: 'name', label: 'Item' },
+        { key: 'itemType', label: 'Type' },
+        { key: 'unit', label: 'Unit' },
+        { label: 'Balance', num: true, render: r => {
+          const cls = r.balanceQty <= 0 ? 'text-danger' : (r.balanceQty < 10 ? 'text-secondary' : '');
+          return `<strong class="${cls}">${r.balanceQty}</strong>`;
+        }},
+      ], { empty: 'No stock data for this category' });
+    }
+
+    /* ── Ledger ─────────────────────────────────────────────────────── */
+    async function loadLedger() {
+      const sku = document.getElementById('ledgerItem').value;
+      const from = document.getElementById('ledgerFrom').value;
+      const to = document.getElementById('ledgerTo').value;
+      const params = new URLSearchParams();
+      if (sku) params.set('sku', sku);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+
+      const el = document.getElementById('ledgerTable');
+      el.innerHTML = '<p class="text-secondary">Loading…</p>';
+
+      try {
+        const data = await apiJSON(`/reports/stock-ledger?${params}`);
+        const rows = data.data || [];
+        el.innerHTML = `<p class="text-secondary mb-1">${rows.length} movements</p>` +
+          buildTable(rows, [
+            { key: 'id', label: '#' },
+            { key: 'date', label: 'Date' },
+            { key: 'sku', label: 'SKU' },
+            { key: 'itemName', label: 'Item' },
+            { label: 'Qty', num: true, render: r => `${r.qty > 0 ? '+' : ''}${r.qty} ${r.unit}` },
+            { label: 'Unit Cost', num: true, render: r => r.unitCostRs ? `₹${r.unitCostRs}` : '—' },
+            { label: 'Source', render: r => sourceLink(r) },
+            { key: 'notes', label: 'Notes' },
+          ]);
+      } catch (err) {
+        el.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    function sourceLink(row) {
+      const t = row.sourceType;
+      const id = row.sourceId;
+      if (t === 'purchase') return `<a href="#" onclick="alert('Purchase #${id}')">Purchase #${id}</a>`;
+      if (t === 'production_output' || t === 'production_issue' || t === 'production_damage')
+        return `<a href="production.html">Prod Run #${id}</a>`;
+      if (t === 'dispatch') return `<a href="admin.html">Invoice #${id}</a>`;
+      if (t === 'return') return `<span class="badge badge-yellow">Return #${id}</span>`;
+      return `${t} #${id}`;
+    }
+
+    loadStock();
+    loadLedger();
+  </script>
+</body>
+</html>

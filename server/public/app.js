@@ -62,6 +62,8 @@ function buildNav() {
     links.push({ href: 'admin.html', label: 'Admin' });
   if (['production','admin','owner'].includes(role))
     links.push({ href: 'production.html', label: 'Production' });
+  if (['admin','production','auditor','owner'].includes(role))
+    links.push({ href: 'stock.html', label: 'Stock' });
   if (['auditor','owner','admin'].includes(role))
     links.push({ href: 'reports.html', label: 'Reports' });
 

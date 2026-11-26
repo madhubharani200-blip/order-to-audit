@@ -29,7 +29,7 @@ describe('Order-to-Audit Step 4a: Static Web UI', () => {
     expect(loginRes.headers['content-type']).toMatch(/text\/html/);
     expect(loginRes.text).toContain('/auth/login');
 
-    for (const path of ['/style.css', '/app.js', '/orders.html', '/admin.html', '/production.html', '/reports.html']) {
+    for (const path of ['/style.css', '/app.js', '/orders.html', '/admin.html', '/production.html', '/reports.html', '/stock.html']) {
       const res = await request(app).get(path);
       expect(res.status, `Expected 200 for ${path}`).toBe(200);
     }

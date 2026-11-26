@@ -10,13 +10,102 @@
   <nav class="top-bar" id="top-nav"></nav>
   <div id="offline-banner" class="offline-banner"></div>
 
-  <div class="container">
-    <h1>🏭 Production Runs</h1>
+  <div class="container wide">
+    <h1>🏭 Production</h1>
 
-    <!-- Production report -->
+    <!-- ── Record a Purchase ──────────────────────────────────────────── -->
+    <div class="card">
+      <h3>📥 Record Purchase</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="purSupplier">Supplier</label>
+          <input type="text" id="purSupplier" placeholder="e.g. Erode Agro Mills">
+        </div>
+        <div class="form-group">
+          <label for="purDate">Date</label>
+          <input type="date" id="purDate">
+        </div>
+      </div>
+      <h4 class="mb-1">Purchase Lines</h4>
+      <div id="purLines"></div>
+      <button class="btn btn-outline btn-sm mt-1" onclick="addPurLine()">+ Add line</button>
+      <div id="purMsg" class="mt-1"></div>
+      <button class="btn btn-primary mt-1" onclick="submitPurchase()">Save Purchase</button>
+    </div>
+
+    <!-- ── Start a Production Run ─────────────────────────────────────── -->
+    <div class="card">
+      <h3>⚙️ Start Production Run</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="runProduct">Product</label>
+          <select id="runProduct"><option value="">Loading…</option></select>
+        </div>
+        <div class="form-group">
+          <label for="runBatches">Batches</label>
+          <input type="number" id="runBatches" value="1" min="1">
+        </div>
+        <div class="form-group">
+          <label for="runDate">Date</label>
+          <input type="date" id="runDate">
+        </div>
+      </div>
+
+      <h4 class="mb-1">Raw Material Issues</h4>
+      <div id="runIssues"></div>
+      <button class="btn btn-outline btn-sm mt-1" onclick="addIssue()">+ Add material</button>
+
+      <div class="form-row mt-2">
+        <div class="form-group">
+          <label for="runGood">Good Packets</label>
+          <input type="number" id="runGood" min="0" placeholder="188">
+        </div>
+        <div class="form-group">
+          <label for="runDamaged">Damaged Pouches</label>
+          <input type="number" id="runDamaged" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label for="runCartons">Cartons Used</label>
+          <input type="number" id="runCartons" min="0" placeholder="9">
+        </div>
+      </div>
+
+      <div id="runMsg" class="mt-1"></div>
+      <button class="btn btn-success mt-1" onclick="submitRun()">Start Run</button>
+    </div>
+
+    <!-- ── Run Result with variance ───────────────────────────────────── -->
+    <div class="card hidden" id="runResultCard">
+      <h3>Latest Run Result</h3>
+      <div id="runResult"></div>
+    </div>
+
+    <!-- ── Overheads & Costing ────────────────────────────────────────── -->
+    <div class="card hidden" id="overheadCard">
+      <h3>💰 Add Overheads &amp; View Cost</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="ohLabour">Labour (₹)</label>
+          <input type="number" id="ohLabour" step="0.01" value="0">
+        </div>
+        <div class="form-group">
+          <label for="ohPower">Power / Gas (₹)</label>
+          <input type="number" id="ohPower" step="0.01" value="0">
+        </div>
+        <div class="form-group" style="align-self:flex-end">
+          <button class="btn btn-primary btn-sm" onclick="addOverheads()">Add Overheads</button>
+          <button class="btn btn-outline btn-sm" onclick="loadCost()">Refresh Cost</button>
+        </div>
+      </div>
+      <div id="ohMsg" class="mt-1"></div>
+      <div id="costResult" class="mt-1"></div>
+    </div>
+
+    <!-- ── Existing production runs ───────────────────────────────────── -->
+    <h2>Production Runs</h2>
     <div class="card" id="productionReport"><p class="text-secondary">Loading…</p></div>
 
-    <!-- Stock summary -->
+    <!-- ── Current Stock ──────────────────────────────────────────────── -->
     <h2>Current Stock</h2>
     <div class="card" id="stockSummary"><p class="text-secondary">Loading…</p></div>
   </div>
@@ -26,6 +115,265 @@
     const user = requireAuth(['production','admin','owner']);
     if (!user) throw new Error('redirect');
 
+    let allItems = [];
+    let rawItems = [];
+    let finishedItems = [];
+    let boms = [];
+    let lastRunId = null;
+
+    /* ── Init ───────────────────────────────────────────────────────── */
+    async function init() {
+      try {
+        const [itemRes, bomRes] = await Promise.all([
+          apiJSON('/items'),
+          apiJSON('/boms'),
+        ]);
+        allItems = itemRes.items || [];
+        rawItems = allItems.filter(i => ['raw','packaging'].includes(i.itemType));
+        finishedItems = allItems.filter(i => i.itemType === 'finished');
+        boms = bomRes.boms || [];
+
+        // Populate selects
+        const prodSel = document.getElementById('runProduct');
+        prodSel.innerHTML = '<option value="">— Select Product —</option>' +
+          finishedItems.map(i => `<option value="${i.id}">${i.name} (${i.sku})</option>`).join('');
+
+        document.getElementById('purDate').value = today();
+        document.getElementById('runDate').value = today();
+        addPurLine();
+        addIssue();
+      } catch (err) {
+        showOffline(err.message);
+      }
+      loadProduction();
+      loadStock();
+    }
+
+    function today() { return new Date().toISOString().slice(0,10); }
+
+    function itemSelect(items, dataField) {
+      return `<select data-field="${dataField}">
+        <option value="">— Item —</option>
+        ${items.map(i => `<option value="${i.id}">${i.name} (${i.sku})</option>`).join('')}
+      </select>`;
+    }
+
+    /* ── Purchase form ──────────────────────────────────────────────── */
+    function addPurLine() {
+      const div = document.createElement('div');
+      div.className = 'order-line';
+      div.innerHTML = `
+        ${itemSelect(rawItems, 'item')}
+        <input type="number" data-field="qty" placeholder="Qty" min="0.01" step="any" style="max-width:90px">
+        <input type="number" data-field="rate" placeholder="Rate ₹" min="0" step="0.01" style="max-width:100px">
+        <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>`;
+      document.getElementById('purLines').appendChild(div);
+    }
+
+    async function submitPurchase() {
+      const msgEl = document.getElementById('purMsg');
+      msgEl.innerHTML = '';
+      const supplier = document.getElementById('purSupplier').value.trim();
+      const date = document.getElementById('purDate').value;
+      if (!supplier) { msgEl.innerHTML = '<div class="alert alert-error">Supplier required</div>'; return; }
+
+      const lines = [];
+      document.querySelectorAll('#purLines .order-line').forEach(el => {
+        const itemId = Number(el.querySelector('[data-field=item]').value);
+        const qty = Number(el.querySelector('[data-field=qty]').value);
+        const ratePaisa = Math.round((Number(el.querySelector('[data-field=rate]').value) || 0) * 100);
+        if (itemId && qty > 0 && ratePaisa > 0) lines.push({ itemId, qty, ratePaisa });
+      });
+      if (!lines.length) { msgEl.innerHTML = '<div class="alert alert-error">Add at least one valid line</div>'; return; }
+
+      try {
+        const res = await apiJSON('/purchases', {
+          method: 'POST',
+          body: JSON.stringify({
+            purchaseNumber: `PUR-${Date.now()}`,
+            supplierName: supplier,
+            purchaseDate: date,
+            lines,
+          }),
+        });
+        msgEl.innerHTML = `<div class="alert alert-success">Purchase ${res.purchase?.id ?? ''} saved!</div>`;
+        loadStock();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    /* ── Production Run form ─────────────────────────────────────────── */
+    function addIssue() {
+      const div = document.createElement('div');
+      div.className = 'order-line';
+      div.innerHTML = `
+        ${itemSelect(rawItems, 'item')}
+        <input type="number" data-field="qty" placeholder="Qty" min="0.01" step="any" style="max-width:100px">
+        <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>`;
+      document.getElementById('runIssues').appendChild(div);
+    }
+
+    // Auto-populate BOM lines when product is selected
+    document.addEventListener('change', e => {
+      if (e.target.id !== 'runProduct') return;
+      const prodId = Number(e.target.value);
+      const bom = boms.find(b => b.finishedItemId === prodId);
+      if (!bom) return;
+      const batches = Number(document.getElementById('runBatches').value) || 1;
+      const container = document.getElementById('runIssues');
+      container.innerHTML = '';
+      for (const line of bom.lines.filter(l => l.lineType === 'raw' || l.lineType === 'packaging')) {
+        const div = document.createElement('div');
+        div.className = 'order-line';
+        const expectedQty = (line.qtyPerBatch * batches);
+        div.innerHTML = `
+          ${itemSelect(rawItems, 'item')}
+          <input type="number" data-field="qty" value="${expectedQty}" min="0.01" step="any" style="max-width:100px">
+          <span class="text-secondary" style="font-size:.8rem;min-width:60px">planned: ${expectedQty}</span>
+          <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>`;
+        div.querySelector('[data-field=item]').value = line.itemId;
+        container.appendChild(div);
+      }
+    });
+
+    async function submitRun() {
+      const msgEl = document.getElementById('runMsg');
+      msgEl.innerHTML = '';
+      const productId = Number(document.getElementById('runProduct').value);
+      const batches = Number(document.getElementById('runBatches').value) || 1;
+      const runDate = document.getElementById('runDate').value;
+      const goodPackets = Number(document.getElementById('runGood').value) || 0;
+      const damagedPouches = Number(document.getElementById('runDamaged').value) || 0;
+      const cartonsUsed = Number(document.getElementById('runCartons').value) || 0;
+
+      if (!productId) { msgEl.innerHTML = '<div class="alert alert-error">Select a product</div>'; return; }
+      if (!goodPackets) { msgEl.innerHTML = '<div class="alert alert-error">Enter good packets</div>'; return; }
+
+      const rawIssues = [];
+      document.querySelectorAll('#runIssues .order-line').forEach(el => {
+        const itemId = Number(el.querySelector('[data-field=item]').value);
+        const qty = Number(el.querySelector('[data-field=qty]').value);
+        if (itemId && qty > 0) rawIssues.push({ itemId, qty });
+      });
+
+      try {
+        const res = await apiJSON('/production-runs', {
+          method: 'POST',
+          body: JSON.stringify({
+            runNumber: `PRD-${Date.now()}`,
+            productId, batches, runDate, rawIssues,
+            goodPackets, damagedPouches, cartonsUsed,
+          }),
+        });
+        lastRunId = res.productionRun?.id;
+        msgEl.innerHTML = `<div class="alert alert-success">Run ${lastRunId} completed!</div>`;
+        showRunResult(res);
+        loadProduction();
+        loadStock();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    function showRunResult(res) {
+      const card = document.getElementById('runResultCard');
+      card.classList.remove('hidden');
+      const run = res.productionRun || {};
+      const consumption = res.consumption || [];
+      const tolerance = res.tolerance ?? 300;
+
+      const yieldClass = Math.abs(run.yieldVarianceBps || 0) > tolerance ? 'text-danger' : '';
+      let html = `<p><strong>${run.runNumber || ''}</strong> — 
+        Expected: ${run.expectedYield ?? '?'} | Good: ${run.goodPackets ?? '?'} |
+        Yield Var: <span class="${yieldClass}">${((run.yieldVarianceBps||0)/100).toFixed(1)}%</span></p>`;
+
+      if (consumption.length) {
+        html += buildTable(consumption, [
+          { key: 'sku', label: 'Material' },
+          { key: 'unit', label: 'Unit' },
+          { label: 'Planned', num: true, render: c => c.expectedQty ?? c.expected },
+          { label: 'Actual', num: true, render: c => c.actualQty ?? c.actual },
+          { label: 'Damaged', num: true, render: c => c.damagedQty || '—' },
+          { label: 'Total Issued', num: true, render: c => c.totalIssuedQty ?? c.totalIssued ?? '—' },
+          { label: 'Variance', num: true, render: c => {
+            const bps = c.varianceBps ?? 0;
+            const cls = Math.abs(bps) > tolerance ? 'text-danger' : '';
+            const flag = Math.abs(bps) > tolerance ? ' ⚠️' : '';
+            return `<span class="${cls}">${(bps/100).toFixed(1)}%${flag}</span>`;
+          }},
+        ]);
+      }
+
+      document.getElementById('runResult').innerHTML = html;
+
+      // Show overhead card
+      document.getElementById('overheadCard').classList.remove('hidden');
+    }
+
+    /* ── Overheads & Cost ───────────────────────────────────────────── */
+    async function addOverheads() {
+      if (!lastRunId) return;
+      const msgEl = document.getElementById('ohMsg');
+      msgEl.innerHTML = '';
+      const labour = Math.round((Number(document.getElementById('ohLabour').value) || 0) * 100);
+      const power = Math.round((Number(document.getElementById('ohPower').value) || 0) * 100);
+
+      const overheads = [];
+      if (labour > 0) overheads.push({ category: 'labour', amountPaisa: labour, description: 'Labour cost' });
+      if (power > 0) overheads.push({ category: 'power', amountPaisa: power, description: 'Power/gas cost' });
+      if (!overheads.length) { msgEl.innerHTML = '<div class="alert alert-warning">Enter at least one overhead</div>'; return; }
+
+      try {
+        await apiJSON(`/production-runs/${lastRunId}/overheads`, {
+          method: 'POST',
+          body: JSON.stringify({ overheads }),
+        });
+        msgEl.innerHTML = '<div class="alert alert-success">Overheads recorded!</div>';
+        loadCost();
+      } catch (err) {
+        msgEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    async function loadCost() {
+      if (!lastRunId) return;
+      try {
+        const data = await apiJSON(`/production-runs/${lastRunId}/cost`);
+        const c = data.cost || {};
+        let html = `<div class="card" style="background:#f8f9fa">
+          <h4>Cost Breakdown — Run #${lastRunId}</h4>`;
+
+        if (c.materials) {
+          html += buildTable(c.materials, [
+            { key: 'sku', label: 'Material' },
+            { label: 'Qty', num: true, render: m => m.issuedQty },
+            { label: 'WAC Rate', num: true, render: m => `₹${m.weightedAvgRateRupees}` },
+            { label: 'Cost', num: true, render: m => fmtRs(m.costPaisa) },
+          ]);
+        }
+
+        html += `<div class="mt-1">
+          <strong>Material Cost:</strong> ${fmtRs(c.totalMaterialCostPaisa || 0)}<br>
+          <strong>Overheads:</strong> ${fmtRs(c.overheads?.totalOverheadsPaisa || 0)}<br>
+          <strong>Total Cost:</strong> ${fmtRs(c.totalCostPaisa || 0)}<br>
+          <strong>Good Packets:</strong> ${c.goodPackets || 0}<br>
+          <strong>Cost per Packet:</strong> ${fmtRs(c.costPerPacketPaisa || 0)}
+            (₹${c.costPerPacketRupees ?? '?'})<br>`;
+
+        if (c.margin) {
+          html += `<strong>Selling Price:</strong> ${fmtRs(c.margin.sellingPricePaisa || 0)}<br>
+            <strong>Margin:</strong> ${fmtRs(c.margin.marginPerPacketPaisa || 0)}/pkt
+            (${((c.margin.marginBps||0)/100).toFixed(1)}%)`;
+        }
+        html += '</div></div>';
+        document.getElementById('costResult').innerHTML = html;
+      } catch (err) {
+        document.getElementById('costResult').innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    }
+
+    /* ── Existing runs & stock (kept from Step 4a) ───────────────────── */
     async function loadProduction() {
       try {
         const data = await apiJSON('/reports/production');
@@ -41,6 +389,7 @@
             <div class="flex justify-between items-center">
               <strong>${run.runNumber}</strong>
               <span class="text-secondary">${run.runDate}</span>
+              <button class="btn btn-outline btn-sm" onclick="lastRunId=${run.runId};document.getElementById('overheadCard').classList.remove('hidden');loadCost()">View Cost</button>
             </div>
             <p>${run.productName} — Expected: ${run.expectedYieldQty} | Good: ${run.actualGoodYieldQty}
               | Yield: <span class="${yieldClass}">${(run.yieldVarianceBps/100).toFixed(1)}%</span></p>`;
@@ -52,7 +401,7 @@
               { label: 'Damaged', num: true, render: c => c.damagedQty || '—' },
               { label: 'Variance', num: true, render: c => {
                 const cls = c.flagged ? 'text-danger' : '';
-                return `<span class="${cls}">${(c.varianceBps/100).toFixed(1)}%</span>`;
+                return `<span class="${cls}">${(c.varianceBps/100).toFixed(1)}%${c.flagged ? ' ⚠️':''}</span>`;
               }},
             ]);
           }
@@ -79,8 +428,7 @@
       }
     }
 
-    loadProduction();
-    loadStock();
+    init();
   </script>
 </body>
 </html>
