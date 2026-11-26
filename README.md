@@ -3,7 +3,7 @@
 A working prototype that takes a small South Indian snack manufacturer from a salesman's order to the auditor's monthly report. Every transaction is entered once at its source and flows into stock, production, costing and accounts.
 
 Built for the NIT Tiruchirappalli (Centre for Digital Infrastructure) internship shortlisting task.
-
+Live demo: https://order-to-audit-jxsy.onrender.com
 Demo video: <paste unlisted YouTube/Drive link here>
 
 ## Run it
