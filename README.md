@@ -4,7 +4,7 @@ A working prototype that takes a small South Indian snack manufacturer from a sa
 
 Built for the NIT Tiruchirappalli (Centre for Digital Infrastructure) internship shortlisting task.
 Live demo: https://order-to-audit-jxsy.onrender.com
-Demo video: <paste unlisted YouTube/Drive link here>
+Demo video: https://youtu.be/PwD2g6-kbcw?si=sy_fPwvNCKARVXCN
 
 ## Run it
 
