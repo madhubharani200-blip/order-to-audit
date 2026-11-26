@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_number TEXT NOT NULL UNIQUE,
   financial_year TEXT NOT NULL,
-  seq_number INTEGER NOT NULL CHECK (seq_number > 0),
+  seq_number INTEGER NOT NULL CHECK (seq_number != 0),
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   order_id INTEGER REFERENCES orders(id),
   invoice_date TEXT NOT NULL,
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   igst_paisa INTEGER NOT NULL DEFAULT 0 CHECK (igst_paisa >= 0),
   total_tax_paisa INTEGER NOT NULL CHECK (total_tax_paisa >= 0),
   grand_total_paisa INTEGER NOT NULL CHECK (grand_total_paisa >= 0),
-  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('draft', 'issued', 'partially_paid', 'paid', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('draft', 'issued', 'partially_paid', 'paid', 'cancelled', 'credit_note')),
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (financial_year, seq_number)

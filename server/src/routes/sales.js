@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { NotFoundError, ValidationError } from '../lib/errors.js';
-import { fromScaledQty } from '../lib/units.js';
+import { buildInvoicePdf, buildInvoiceShareLinks } from '../services/invoicePdf.js';
+import { issueCreditNote } from '../services/creditNote.js';
+import { NotFoundError, ForbiddenError, ValidationError } from '../lib/errors.js';
 import { ALL_ROLES, requireRole } from '../middleware/auth.js';
 import {
   approveOrder,
@@ -9,6 +10,9 @@ import {
   getOrderStockCheck,
   recordPayment,
 } from '../services/sales.js';
+import { fromScaledQty } from '../lib/units.js';
+
+const REPORT_ROLES = ['admin', 'auditor', 'owner'];
 
 function resolveEffectivePricePaisa(db, itemId, customerId, explicitPrice) {
   if (explicitPrice !== undefined) return explicitPrice;
@@ -81,14 +85,25 @@ function formatInvoice(db, inv) {
 export function createOrdersRouter(db) {
   const router = Router();
 
-  router.get('/', requireRole(...ALL_ROLES), (_req, res) => {
-    const orders = db.prepare('SELECT * FROM orders ORDER BY id DESC').all();
+  router.get('/', requireRole(...ALL_ROLES), (req, res) => {
+    // salesmen only see their own orders
+    const userId = req.user.id;
+    const role = req.user.role;
+    let orders;
+    if (role === 'salesman') {
+      orders = db.prepare('SELECT * FROM orders WHERE created_by = ? ORDER BY id DESC').all(userId);
+    } else {
+      orders = db.prepare('SELECT * FROM orders ORDER BY id DESC').all();
+    }
     res.json({ orders });
   });
 
   router.get('/:id', requireRole(...ALL_ROLES), (req, res, next) => {
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(req.params.id));
     if (!order) return next(new NotFoundError('Order not found'));
+    if (req.user.role === 'salesman' && order.created_by !== req.user.id) {
+      return next(new ForbiddenError('Access denied to this order'));
+    }
     const lines = db.prepare('SELECT * FROM order_lines WHERE order_id = ?').all(order.id);
     return res.json({ order, lines });
   });
@@ -147,15 +162,70 @@ export function createOrdersRouter(db) {
 export function createInvoicesRouter(db) {
   const router = Router();
 
-  router.get('/', requireRole(...ALL_ROLES), (_req, res) => {
-    const rows = db.prepare('SELECT * FROM invoices ORDER BY id DESC').all();
+  router.get('/', requireRole(...ALL_ROLES), (req, res) => {
+    const userId = req.user.id;
+    const role = req.user.role;
+    let rows;
+    if (role === 'salesman') {
+      rows = db.prepare('SELECT * FROM invoices WHERE created_by = ? ORDER BY id DESC').all(userId);
+    } else {
+      rows = db.prepare('SELECT * FROM invoices ORDER BY id DESC').all();
+    }
     res.json({ invoices: rows.map((r) => formatInvoice(db, r)) });
   });
 
   router.get('/:id', requireRole(...ALL_ROLES), (req, res, next) => {
     const row = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
     if (!row) return next(new NotFoundError('Invoice not found'));
+    if (req.user.role === 'salesman' && row.created_by !== req.user.id) {
+      return next(new ForbiddenError('Access denied to this invoice'));
+    }
     return res.json({ invoice: formatInvoice(db, row) });
+  });
+
+  // PDF download
+  router.get('/:id/pdf', requireRole(...ALL_ROLES), async (req, res, next) => {
+    try {
+      const invoiceId = Number(req.params.id);
+      const inv = db.prepare('SELECT id, created_by FROM invoices WHERE id = ?').get(invoiceId);
+      if (!inv) return next(new NotFoundError('Invoice not found'));
+      if (req.user.role === 'salesman' && inv.created_by !== req.user.id) {
+        return next(new ForbiddenError('Access denied to this invoice'));
+      }
+      const pdfBuffer = await buildInvoicePdf(db, invoiceId);
+      if (!pdfBuffer) return next(new NotFoundError('Invoice not found'));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="invoice-${invoiceId}.pdf"`);
+      return res.send(pdfBuffer);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // Share links (WhatsApp + mailto)
+  router.get('/:id/share', requireRole(...ALL_ROLES), (req, res, next) => {
+    try {
+      const invoiceId = Number(req.params.id);
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const links = buildInvoiceShareLinks(db, invoiceId, { baseUrl });
+      if (!links) return next(new NotFoundError('Invoice not found'));
+      return res.json(links);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // Credit note
+  router.post('/:id/credit-note', requireRole('admin'), (req, res, next) => {
+    try {
+      const invoiceId = Number(req.params.id);
+      const { reason } = req.body ?? {};
+      if (!reason) throw new ValidationError('reason is required');
+      const result = issueCreditNote(db, { invoiceId, reason, actorUserId: req.user.id });
+      return res.status(201).json(result);
+    } catch (err) {
+      return next(err);
+    }
   });
 
   router.post('/', requireRole('salesman', 'admin'), (req, res, next) => {
