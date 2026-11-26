@@ -16,8 +16,9 @@ const db = openDb(dbPath);
 initSchema(db);
 seedDatabase(db);
 
-const app = createApp({ db });
-const port = Number(process.env.PORT || 3001);
+const jwtSecret = process.env.JWT_SECRET || 'order-to-audit-dev-secret';
+const app = createApp({ db, jwtSecret });
+const port = Number(process.env.PORT || 3000);
 
 app.listen(port, () => {
   console.log(`Order-to-Audit API listening on http://localhost:${port}`);
